@@ -1,0 +1,225 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all unknown paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Admin helper if needed
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "atsiu143@gmail.com" ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // =========================================================================
+    // USERS COLLECTION
+    // =========================================================================
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             data.username is string && data.username.size() >= 3 && data.username.size() <= 50 &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 500)) &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1024)) &&
+             (!('interests' in data) || (data.interests is list && data.interests.size() <= 50)) &&
+             (!('languages' in data) || (data.languages is list && data.languages.size() <= 20)) &&
+             (!('reputation' in data) || (data.reputation is number)) &&
+             (!('isVerified' in data) || (data.isVerified is bool)) &&
+             (!('blockedUsers' in data) || (data.blockedUsers is list && data.blockedUsers.size() <= 200)) &&
+             data.createdAt is string;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().uid == userId;
+      allow update: if (isOwner(userId) || isAdmin()) && isValidUser(incoming()) &&
+                       incoming().uid == existing().uid &&
+                       incoming().createdAt == existing().createdAt &&
+                       (isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName', 'username', 'bio', 'photoUrl', 'interests',
+                         'languages', 'notificationSettings', 'blockedUsers', 'lastActiveAt'
+                       ]));
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // =========================================================================
+    // ACTIVITIES COLLECTION
+    // =========================================================================
+    function isValidActivity(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.creatorId is string && data.creatorId.size() <= 128 &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+             data.category is string && data.category.size() <= 50 &&
+             data.latitude is number && data.latitude >= -90.0 && data.latitude <= 90.0 &&
+             data.longitude is number && data.longitude >= -180.0 && data.longitude <= 180.0 &&
+             data.startTime is string && data.endTime is string &&
+             data.maxParticipants is number && data.maxParticipants >= 2 && data.maxParticipants <= 1000 &&
+             data.participantCount is number && data.participantCount >= 0 &&
+             data.status in ['upcoming', 'happening', 'finished', 'cancelled'] &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+             (!('approximateLocation' in data) || (data.approximateLocation is string && data.approximateLocation.size() <= 200)) &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1024)) &&
+             (!('visibility' in data) || (data.visibility in ['public', 'unlisted'])) &&
+             data.createdAt is string;
+    }
+
+    match /activities/{activityId} {
+      // Anyone signed in (or guests) can read public activities
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() && isValidId(activityId) && isValidActivity(incoming()) &&
+                       incoming().id == activityId && incoming().creatorId == request.auth.uid &&
+                       incoming().participantCount <= incoming().maxParticipants;
+
+      // Creator or Admin can update full activity metadata, or participants can update participantCount during join/leave transactions
+      allow update: if isSignedIn() && isValidActivity(incoming()) &&
+                       incoming().id == existing().id &&
+                       incoming().creatorId == existing().creatorId &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Case 1: Creator or admin updates activity details
+                         (isOwner(existing().creatorId) || isAdmin()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'description', 'category', 'latitude', 'longitude',
+                           'approximateLocation', 'startTime', 'endTime', 'maxParticipants',
+                           'participantCount', 'status', 'updatedAt', 'imageUrl', 'visibility'
+                         ])
+                       ) || (
+                         // Case 2: Join or leave updates participant count within limits
+                         incoming().diff(existing()).affectedKeys().hasOnly(['participantCount', 'updatedAt']) &&
+                         incoming().participantCount >= 0 &&
+                         incoming().participantCount <= existing().maxParticipants
+                       );
+
+      allow delete: if (isOwner(existing().creatorId) || isAdmin());
+
+      // =======================================================================
+      // PARTICIPANTS SUBCOLLECTION
+      // =======================================================================
+      function isValidParticipant(data) {
+        return data.userId is string && data.userId.size() <= 128 &&
+               data.role in ['creator', 'participant'] &&
+               data.joinedAt is string &&
+               (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+               (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1024));
+      }
+
+      match /participants/{userId} {
+        allow get, list: if isSignedIn();
+        // A user can join for themselves or creator can initialize
+        allow create: if isSignedIn() && isValidId(userId) && isOwner(userId) && isValidParticipant(incoming()) &&
+                         incoming().userId == userId;
+        // User can leave (delete their own participant doc) or creator can remove
+        allow delete: if isSignedIn() && (isOwner(userId) || isOwner(get(/databases/$(database)/documents/activities/$(activityId)).data.creatorId) || isAdmin());
+        allow update: if isSignedIn() && (isOwner(userId) || isAdmin()) && isValidParticipant(incoming());
+      }
+
+      // =======================================================================
+      // CHAT MESSAGES SUBCOLLECTION
+      // =======================================================================
+      function isValidMessage(data) {
+        return data.id is string && data.id.size() <= 128 &&
+               data.activityId is string && data.activityId.size() <= 128 &&
+               data.senderId is string && data.senderId.size() <= 128 &&
+               data.text is string && data.text.size() >= 1 && data.text.size() <= 1000 &&
+               data.type in ['text', 'system'] &&
+               data.createdAt is string &&
+               (!('senderName' in data) || (data.senderName is string && data.senderName.size() <= 100)) &&
+               (!('senderPhoto' in data) || (data.senderPhoto is string && data.senderPhoto.size() <= 1024));
+      }
+
+      match /messages/{messageId} {
+        // Read allowed for authenticated users
+        allow get, list: if isSignedIn();
+        // Authorized participant or creator can send message
+        allow create: if isSignedIn() && isValidId(messageId) && isValidMessage(incoming()) &&
+                         incoming().id == messageId && incoming().senderId == request.auth.uid &&
+                         incoming().activityId == activityId &&
+                         (exists(/databases/$(database)/documents/activities/$(activityId)/participants/$(request.auth.uid)) ||
+                          get(/databases/$(database)/documents/activities/$(activityId)).data.creatorId == request.auth.uid);
+        allow update: if false; // Messages are immutable
+        allow delete: if isSignedIn() && (
+          isOwner(existing().senderId) ||
+          isOwner(get(/databases/$(database)/documents/activities/$(activityId)).data.creatorId) ||
+          isAdmin()
+        );
+      }
+    }
+
+    // =========================================================================
+    // REPORTS COLLECTION
+    // =========================================================================
+    function isValidReport(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.reporterId is string && data.reporterId.size() <= 128 &&
+             data.reason is string && data.reason.size() >= 2 && data.reason.size() <= 100 &&
+             data.description is string && data.description.size() <= 1000 &&
+             data.status in ['pending', 'reviewed', 'dismissed'] &&
+             data.createdAt is string &&
+             (!('reportedUserId' in data) || (data.reportedUserId is string && data.reportedUserId.size() <= 128)) &&
+             (!('activityId' in data) || (data.activityId is string && data.activityId.size() <= 128));
+    }
+
+    match /reports/{reportId} {
+      allow create: if isSignedIn() && isValidId(reportId) && isValidReport(incoming()) &&
+                       incoming().id == reportId && incoming().reporterId == request.auth.uid &&
+                       incoming().status == 'pending';
+      allow get: if isSignedIn() && (isOwner(existing().reporterId) || isAdmin());
+      allow list: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // NOTIFICATIONS COLLECTION
+    // =========================================================================
+    function isValidNotification(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.title is string && data.title.size() <= 150 &&
+             data.body is string && data.body.size() <= 500 &&
+             data.type is string && data.type.size() <= 50 &&
+             data.read is bool &&
+             data.createdAt is string &&
+             (!('activityId' in data) || (data.activityId is string && data.activityId.size() <= 128));
+    }
+
+    match /notifications/{notificationId} {
+      // User can only read their own notifications
+      allow get: if isOwner(existing().userId) || isAdmin();
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Notifications can be created by authenticated users (e.g., when joining creator's activity) or admin
+      allow create: if isSignedIn() && isValidId(notificationId) && isValidNotification(incoming()) &&
+                       incoming().id == notificationId;
+      // User can mark as read
+      allow update: if isOwner(existing().userId) && isValidNotification(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if isOwner(existing().userId) || isAdmin();
+    }
+  }
+}

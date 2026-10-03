@@ -1,0 +1,139 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with interests, languages, and settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "username": { "type": "string", "maxLength": 50, "pattern": "^[a-zA-Z0-9_]{3,30}$" },
+        "photoUrl": { "type": "string", "maxLength": 1024 },
+        "bio": { "type": "string", "maxLength": 500 },
+        "languages": { "type": "array" },
+        "interests": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "lastActiveAt": { "type": "string" },
+        "reputation": { "type": "number" },
+        "isVerified": { "type": "boolean" },
+        "notificationSettings": { "type": "object" },
+        "blockedUsers": { "type": "array" }
+      },
+      "required": ["uid", "displayName", "username", "createdAt"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "Real-time activity created by a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "creatorId": { "type": "string", "maxLength": 128 },
+        "creatorName": { "type": "string", "maxLength": 100 },
+        "creatorPhoto": { "type": "string", "maxLength": 1024 },
+        "title": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 50 },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "approximateLocation": { "type": "string", "maxLength": 200 },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "maxParticipants": { "type": "number" },
+        "participantCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["upcoming", "happening", "finished", "cancelled"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "imageUrl": { "type": "string", "maxLength": 1024 },
+        "visibility": { "type": "string", "enum": ["public", "unlisted"] }
+      },
+      "required": ["id", "creatorId", "title", "category", "latitude", "longitude", "startTime", "endTime", "maxParticipants", "participantCount", "status", "createdAt"]
+    },
+    "Participant": {
+      "title": "Participant",
+      "description": "Member of an activity",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoUrl": { "type": "string", "maxLength": 1024 },
+        "joinedAt": { "type": "string" },
+        "role": { "type": "string", "enum": ["creator", "participant"] }
+      },
+      "required": ["userId", "joinedAt", "role"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Chat message inside an activity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "activityId": { "type": "string", "maxLength": 128 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "senderPhoto": { "type": "string", "maxLength": 1024 },
+        "text": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "system"] }
+      },
+      "required": ["id", "activityId", "senderId", "text", "createdAt", "type"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Safety report for an activity or user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "reportedUserId": { "type": "string", "maxLength": 128 },
+        "activityId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "reviewed", "dismissed"] }
+      },
+      "required": ["id", "reporterId", "reason", "description", "createdAt", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification for events, messages, and joins",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 150 },
+        "body": { "type": "string", "maxLength": 500 },
+        "type": { "type": "string", "maxLength": 50 },
+        "activityId": { "type": "string", "maxLength": 128 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "body", "type", "read", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "Public and unlisted activities"
+    },
+    "/activities/{activityId}/participants/{userId}": {
+      "schema": "Participant",
+      "description": "Participants in an activity"
+    },
+    "/activities/{activityId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Activity chat messages"
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Safety and moderation reports"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User specific notifications"
+    }
+  }
+}

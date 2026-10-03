@@ -1,0 +1,6 @@
+{
+  "name": "NOWLY - Real-Time Social Activity Discovery",
+  "description": "Discover what is happening around you right now, join activities, meet people with shared interests, and explore real-time social events.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
